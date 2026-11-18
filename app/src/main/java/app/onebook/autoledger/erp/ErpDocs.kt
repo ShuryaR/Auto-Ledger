@@ -6,6 +6,7 @@ import app.onebook.autoledger.core.OpenOrder
 import app.onebook.autoledger.core.PartyDoctype
 import app.onebook.autoledger.core.PartyRef
 import app.onebook.autoledger.core.SimilarEngine
+import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -24,6 +25,9 @@ object ErpDocs {
         val bankAccountNo: String?,
         val isCompanyAccount: Boolean,
         val bank: String?,
+        val company: String? = null,
+        val partyType: String? = null,
+        val disabled: Boolean = false,
     )
     data class LedgerAccountInfo(val name: String, val accountType: String?)
     data class ModeOfPaymentInfo(val name: String, val type: String?)
@@ -82,27 +86,104 @@ object ErpDocs {
         }
     }
 
-    suspend fun listBankAccounts(c: ErpClient, company: String): List<BankAccountInfo> {
-        val arr = listRows(
-            c,
-            "Bank Account",
-            mapOf(
-                "fields" to JSONArray().put("name").put("account").put("bank_account_no").put("is_company_account").put("bank"),
-                "filters" to JSONArray().put(JSONArray().put("company").put("=").put(company)),
-                "limit_page_length" to 0,
-            ),
-        )
+    internal fun parseBankAccountRows(arr: JSONArray): List<BankAccountInfo> {
         return (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             val isComp = o.optInt("is_company_account", 0) != 0 || o.optBoolean("is_company_account", false)
+            val isDisabled = o.optInt("disabled", 0) != 0 || o.optBoolean("disabled", false)
             BankAccountInfo(
                 name = o.getString("name"),
-                glAccount = o.optString("account", ""),
+                glAccount = optStr(o, "account") ?: "",
                 bankAccountNo = optStr(o, "bank_account_no"),
                 isCompanyAccount = isComp,
                 bank = optStr(o, "bank"),
+                company = optStr(o, "company"),
+                partyType = optStr(o, "party_type"),
+                disabled = isDisabled,
             )
         }
+    }
+
+    internal fun resolveBankAccounts(
+        bankRows: List<BankAccountInfo>,
+        ledgerAccounts: List<LedgerAccountInfo>,
+        company: String,
+    ): List<BankAccountInfo> {
+        val companyGlNames = ledgerAccounts.mapTo(HashSet()) { it.name }
+        val kept = bankRows.filter { row ->
+            if (row.disabled || !row.partyType.isNullOrBlank()) return@filter false
+            when {
+                row.company == company -> true
+                row.company.isNullOrBlank() -> {
+                    if (row.glAccount.isNotBlank()) {
+                        companyGlNames.isEmpty() || row.glAccount in companyGlNames
+                    } else {
+                        true
+                    }
+                }
+                else -> false
+            }
+        }
+        val coveredGl = kept.mapNotNullTo(HashSet()) { it.glAccount.takeIf { gl -> gl.isNotBlank() } }
+        val extraGl = ledgerAccounts
+            .filter { it.accountType.equals("Bank", ignoreCase = true) && it.name !in coveredGl }
+            .map { gl ->
+                BankAccountInfo(
+                    name = gl.name,
+                    glAccount = gl.name,
+                    bankAccountNo = null,
+                    isCompanyAccount = true,
+                    bank = null,
+                    company = company,
+                )
+            }
+        return kept + extraGl
+    }
+
+    suspend fun listBankAccounts(c: ErpClient, company: String): List<BankAccountInfo> {
+        var bankErr: Throwable? = null
+        val bankRows = try {
+            val arr = listRows(
+                c,
+                "Bank Account",
+                mapOf(
+                    "fields" to JSONArray()
+                        .put("name")
+                        .put("account")
+                        .put("bank_account_no")
+                        .put("is_company_account")
+                        .put("bank")
+                        .put("company")
+                        .put("party_type")
+                        .put("disabled"),
+                    "limit_page_length" to 0,
+                ),
+            )
+            parseBankAccountRows(arr)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ErpAuthError) {
+            if (e.status != 403) throw e
+            bankErr = e
+            emptyList()
+        }
+
+        val ledgerAccounts = try {
+            listLedgerAccounts(c, company)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ErpAuthError) {
+            if (e.status != 403) throw e
+            if (bankErr != null) throw bankErr
+            emptyList()
+        } catch (e: Throwable) {
+            if (bankErr != null) throw bankErr
+            emptyList()
+        }
+
+        val resolved = resolveBankAccounts(bankRows, ledgerAccounts, company)
+        if (resolved.isEmpty() && bankErr != null) throw bankErr
+        return resolved
     }
 
     suspend fun listLedgerAccounts(c: ErpClient, company: String, rootType: String? = null): List<LedgerAccountInfo> {

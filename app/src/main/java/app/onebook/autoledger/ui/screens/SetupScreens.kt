@@ -196,7 +196,7 @@ fun SetupAccountsScreen(
             val loadedModes = ErpDocs.listModesOfPayment(client)
             val existing = container.repo.listMappings()
             val listed = accounts.filter { a ->
-                a.isCompanyAccount || existing.any { m -> m.bankAccount == a.name }
+                (!a.disabled && a.partyType.isNullOrBlank()) || existing.any { m -> m.bankAccount == a.name }
             }
             modes = loadedModes
             drafts = SetupLogic.buildDrafts(listed, existing, loadedModes)
@@ -278,6 +278,7 @@ fun SetupAccountsScreen(
                 title = d.bankAccount,
                 subtitle = when {
                     !d.supported -> SetupLogic.NOT_SUPPORTED
+                    d.glAccount.isBlank() -> "No GL Account linked in ERPNext"
                     d.saved -> SAVED_ACCOUNT_NOTE
                     else -> null
                 },

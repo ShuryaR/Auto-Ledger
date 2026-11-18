@@ -1,0 +1,220 @@
+name: Build APK, Tag & Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional git release tag (e.g. v1.0.1). Leave blank to auto-derive from versionName."
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark GitHub Release as pre-release"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Test, Build APK, Tag & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Resolve Gradle command & release tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+
+          if [ -x "./gradlew" ]; then
+            echo "gradle_cmd=./gradlew" >> "$GITHUB_OUTPUT"
+          else
+            echo "gradle_cmd=gradle" >> "$GITHUB_OUTPUT"
+          fi
+
+          VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-1}"
+
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            TAG="$REF_NAME"
+          elif [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            BASE_TAG="v${VERSION_NAME}"
+            if git rev-parse -q --verify "refs/tags/${BASE_TAG}" >/dev/null 2>&1; then
+              TAG="${BASE_TAG}-b${RUN_NUMBER}"
+            else
+              TAG="${BASE_TAG}"
+            fi
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=${TAG}, versionName=${VERSION_NAME}, versionCode=${VERSION_CODE}"
+
+      - name: Run unit tests
+        run: ${{ steps.meta.outputs.gradle_cmd }} :app:testDebugUnitTest --no-daemon
+
+      - name: Build Debug & Release APKs
+        run: ${{ steps.meta.outputs.gradle_cmd }} :app:assembleDebug :app:assembleRelease --no-daemon
+
+      - name: Prepare, sign (if keystore provided) & checksum APKs
+        id: package
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$DEBUG_APK" ]; then
+            echo "Debug APK not found at $DEBUG_APK"
+            exit 1
+          fi
+          cp "$DEBUG_APK" "dist/AutoLedger-${TAG}-debug.apk"
+
+          RELEASE_UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          RELEASE_SIGNED="app/build/outputs/apk/release/app-release.apk"
+
+          if [ -f "$RELEASE_SIGNED" ]; then
+            cp "$RELEASE_SIGNED" "dist/AutoLedger-${TAG}-release.apk"
+            echo "signed_release=true" >> "$GITHUB_OUTPUT"
+          elif [ -f "$RELEASE_UNSIGNED" ]; then
+            if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] && [ -n "${ANDROID_KEY_ALIAS:-}" ]; then
+              KEYSTORE_PATH="/tmp/release-upload.keystore"
+              printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+
+              SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+              BUILD_TOOLS_DIR=$(ls -1d "${SDK_ROOT}/build-tools/"* | sort -V | tail -n1)
+
+              if [ -n "${ANDROID_KEY_PASSWORD:-}" ]; then
+                KEY_PASS_VAR="ANDROID_KEY_PASSWORD"
+              else
+                KEY_PASS_VAR="ANDROID_KEYSTORE_PASSWORD"
+              fi
+
+              "${BUILD_TOOLS_DIR}/zipalign" -p -f 4 "$RELEASE_UNSIGNED" "/tmp/aligned-release.apk"
+              "${BUILD_TOOLS_DIR}/apksigner" sign \
+                --ks "$KEYSTORE_PATH" \
+                --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+                --ks-key-alias "$ANDROID_KEY_ALIAS" \
+                --key-pass "env:${KEY_PASS_VAR}" \
+                --out "dist/AutoLedger-${TAG}-release.apk" \
+                "/tmp/aligned-release.apk"
+
+              "${BUILD_TOOLS_DIR}/apksigner" verify "dist/AutoLedger-${TAG}-release.apk"
+              rm -f "$KEYSTORE_PATH" "/tmp/aligned-release.apk"
+              echo "signed_release=true" >> "$GITHUB_OUTPUT"
+            else
+              cp "$RELEASE_UNSIGNED" "dist/AutoLedger-${TAG}-release-unsigned.apk"
+              echo "signed_release=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          (cd dist && sha256sum *.apk > "checksums-${TAG}.sha256")
+          ls -lh dist/
+
+      - name: Upload workflow APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoledger-apks-${{ steps.meta.outputs.tag }}
+          path: dist/*
+          retention-days: 30
+
+      - name: Create git tag & publish GitHub Release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          SIGNED_RELEASE: ${{ steps.package.outputs.signed_release }}
+          PRERELEASE: ${{ inputs.prerelease == true }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git tag -a "$TAG" -m "Release $TAG (versionName=$VERSION_NAME, versionCode=$VERSION_CODE)"
+            git push origin "refs/tags/${TAG}"
+          fi
+
+          SIGN_NOTE="Signed release APK attached."
+          if [ "${SIGNED_RELEASE}" != "true" ]; then
+            SIGN_NOTE="Unsigned release APK + installable debug APK attached. Add \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_ALIAS\`, and \`ANDROID_KEY_PASSWORD\` repository secrets to sign release APKs automatically."
+          fi
+
+          NOTES_FILE="/tmp/release-notes.md"
+          printf '## AutoLedger %s\n\n- **Version**: `%s` (code `%s`)\n- **Commit**: `%s`\n- **Signing**: %s\n' \
+            "$TAG" "$VERSION_NAME" "$VERSION_CODE" "$GITHUB_SHA" "$SIGN_NOTE" > "$NOTES_FILE"
+
+          GENERATED_BODY=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq '.body' 2>/dev/null || true)
+
+          if [ -n "$GENERATED_BODY" ]; then
+            printf '\n\n%s\n' "$GENERATED_BODY" >> "$NOTES_FILE"
+          fi
+
+          EXTRA_ARGS=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            EXTRA_ARGS+=(--prerelease)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "AutoLedger ${TAG}" \
+              --notes-file "$NOTES_FILE" \
+              "${EXTRA_ARGS[@]}"
+          fi

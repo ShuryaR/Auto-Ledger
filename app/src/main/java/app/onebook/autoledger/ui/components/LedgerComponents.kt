@@ -103,6 +103,7 @@ import app.onebook.autoledger.state.RowStatus
 import app.onebook.autoledger.state.SetupLogic
 import app.onebook.autoledger.state.StatusTone
 import app.onebook.autoledger.ui.theme.LedgerTheme
+import app.onebook.autoledger.ui.theme.LocalBottomBarClearance
 import app.onebook.autoledger.ui.theme.tnum
 
 enum class BannerTone { INFO, OK, WARN, ERROR }
@@ -174,8 +175,7 @@ fun LedgerScreen(
                 if (title != null) {
                     Text(
                         text = title,
-                        fontSize = 24.sp,
-                        lineHeight = 30.sp,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = c.ink,
                     )
@@ -184,8 +184,7 @@ fun LedgerScreen(
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = c.muted,
                     )
                     Spacer(Modifier.height(16.dp))
@@ -193,7 +192,12 @@ fun LedgerScreen(
                     Spacer(Modifier.height(12.dp))
                 }
                 content()
-                Spacer(Modifier.height(24.dp))
+                val bottomClearance = if (footer == null) LocalBottomBarClearance.current else 0.dp
+                Spacer(
+                    Modifier
+                        .height(24.dp + bottomClearance)
+                        .let { if (!applySystemBarPadding && bottomClearance > 0.dp) it.navigationBarsPadding() else it },
+                )
             }
         }
 
@@ -261,8 +265,7 @@ fun LedgerLazyScreen(
                             if (title != null) {
                                 Text(
                                     text = title,
-                                    fontSize = 24.sp,
-                                    lineHeight = 30.sp,
+                                    style = MaterialTheme.typography.headlineMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = c.ink,
                                 )
@@ -271,8 +274,7 @@ fun LedgerLazyScreen(
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = subtitle,
-                                    fontSize = 14.sp,
-                                    lineHeight = 20.sp,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     color = c.muted,
                                 )
                             }
@@ -286,7 +288,12 @@ fun LedgerLazyScreen(
                 }
                 content()
                 item(key = "__bottom_spacer__") {
-                    Spacer(Modifier.height(24.dp))
+                    val bottomClearance = if (footer == null) LocalBottomBarClearance.current else 0.dp
+                    Spacer(
+                        Modifier
+                            .height(24.dp + bottomClearance)
+                            .let { if (!applySystemBarPadding && bottomClearance > 0.dp) it.navigationBarsPadding() else it },
+                    )
                 }
             }
         }
@@ -388,7 +395,7 @@ fun LedgerCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = LedgerTheme.colors
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(16.dp)
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -396,7 +403,7 @@ fun LedgerCard(
             .let { if (onClick != null) it.clip(shape).clickable(onClick = onClick) else it },
         shape = shape,
         color = c.surface,
-        border = BorderStroke(1.dp, if (accentBorder) c.accent else c.line),
+        border = BorderStroke(if (accentBorder) 1.5.dp else 1.dp, if (accentBorder) c.accent else c.line),
     ) {
         Column(modifier = Modifier.padding(16.dp), content = content)
     }
@@ -425,8 +432,9 @@ fun LedgerBanner(
         modifier = modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         color = bg,
+        border = BorderStroke(1.dp, fg.copy(alpha = 0.2f)),
     ) {
         Column(modifier = Modifier.padding(if (compact) 12.dp else 14.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -1008,13 +1016,15 @@ fun LedgerTxnRow(
     onClick: () -> Unit,
 ) {
     val c = LedgerTheme.colors
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(16.dp)
     val icon = when (row.kindIcon) {
         InboxKind.BANK -> Icons.Rounded.AccountBalance
         InboxKind.UPI -> Icons.Rounded.QrCode2
         InboxKind.CARD -> Icons.Rounded.CreditCard
     }
-    val amtColor = if (row.direction == Direction.IN) c.moneyIn else c.moneyOut
+    val isIn = row.direction == Direction.IN
+    val amtColor = if (isIn) c.moneyIn else c.moneyOut
+    val badgeBg = if (isIn) c.moneyInSoft else c.moneyOutSoft
 
     Surface(
         modifier = Modifier
@@ -1035,12 +1045,12 @@ fun LedgerTxnRow(
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
-                    .background(c.paper),
+                    .background(badgeBg),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = c.muted, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, tint = amtColor, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -1117,6 +1127,21 @@ fun LedgerEmptyState(
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(c.accentSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    tint = c.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = c.ink)
             Spacer(Modifier.height(6.dp))
             Text(

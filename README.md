@@ -34,6 +34,16 @@ gradle wrapper --gradle-version 9.3.1
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### Automated GitHub Actions APK Tag & Release
+
+`.github/workflows/release-apk.yml` automatically runs unit tests, builds debug & release APKs, creates & pushes a git tag (`v<versionName>`, or `v<versionName>-b<run_number>` if that tag already exists), and publishes a GitHub Release with attached APKs and SHA-256 checksums on pushes to `main`/`master`, `v*` tags, or manual workflow dispatch.
+
+Optional repository secrets for signed release APKs:
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD` (optional if same as keystore password)
+
 ## Architecture
 
 - `app/src/main/java/app/onebook/autoledger/core/` — Domain types, integer-paise money arithmetic, classification, correlation, booking plan engine, suggestion & similarity matching, trust status

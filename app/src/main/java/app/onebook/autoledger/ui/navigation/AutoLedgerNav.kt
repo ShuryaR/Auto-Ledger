@@ -31,6 +31,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.onebook.autoledger.BuildConfig
 import app.onebook.autoledger.inbox.Step
+import app.onebook.autoledger.reports.ReportSection
 import app.onebook.autoledger.state.AppContainer
 import app.onebook.autoledger.state.GateTarget
 import app.onebook.autoledger.ui.components.BannerTone
@@ -154,6 +155,7 @@ fun AutoLedgerApp(
 
     val navController = rememberNavController()
     var selectedTab by rememberSaveable { mutableStateOf(MainTab.HOME) }
+    var selectedReportSection by rememberSaveable { mutableStateOf(ReportSection.MIS) }
     val backEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backEntry?.destination?.route
 
@@ -288,6 +290,8 @@ fun AutoLedgerApp(
                 container = container,
                 selectedTab = selectedTab,
                 onSelectTab = { selectedTab = it },
+                selectedReportSection = selectedReportSection,
+                onSelectReportSection = { selectedReportSection = it },
                 onSignInAgain = { navController.navigate(Routes.login(canGoBack = true)) },
                 onOpenTxn = { txnId -> navController.navigate(Routes.txnDetail(txnId)) },
                 onOpenGroup = { groupKey -> navController.navigate(Routes.txnBulk(groupKey)) },

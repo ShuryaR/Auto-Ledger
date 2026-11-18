@@ -89,7 +89,7 @@ object SetupLogic {
         modes: List<ErpDocs.ModeOfPaymentInfo>,
     ): List<AccountDraft> = accounts.map { a ->
         val m = existing.firstOrNull { it.bankAccount == a.name }
-        val supported = isSupportedBank(a.bank ?: a.name)
+        val supported = isSupportedBank(a.bank ?: a.name) || isSupportedBank(a.name)
         if (m != null) {
             AccountDraft(
                 bankAccount = a.name,
@@ -127,6 +127,7 @@ object SetupLogic {
             val l4 = parseLast4(d.last4)
             val senderIds = parseSenders(d.senders)
             when {
+                d.glAccount.isBlank() -> errors[d.bankAccount] = "Link a Company GL Account to this Bank Account in ERPNext first."
                 l4 is Last4Result.Err -> errors[d.bankAccount] = l4.error
                 senderIds.isEmpty() -> errors[d.bankAccount] = "Enter the sender id the bank uses, for example IDFCFB."
                 d.modeOfPayment.isBlank() -> errors[d.bankAccount] = "Choose a default mode of payment."

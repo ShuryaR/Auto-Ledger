@@ -597,7 +597,7 @@ fun TxnAccountScreen(
             if (loadedTxn != null && client != null && company.isNotBlank()) {
                 if (isTransfer) {
                     bankMappings = container.repo.listMappings()
-                    erpBankAccounts = ErpDocs.listBankAccounts(client, company).filter { it.isCompanyAccount }
+                    erpBankAccounts = ErpDocs.listBankAccounts(client, company)
                 } else {
                     val rootType = if (draft.action == ActionType.EXPENSE) "Expense" else "Income"
                     ledgerAccounts = ErpDocs.listLedgerAccounts(client, company, rootType)

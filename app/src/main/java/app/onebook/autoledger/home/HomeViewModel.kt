@@ -16,10 +16,10 @@ import app.onebook.autoledger.inbox.Formatters
 import app.onebook.autoledger.ingest.CycleSummary
 import app.onebook.autoledger.ingest.DrainStopReason
 import app.onebook.autoledger.ingest.IngestPipeline
+import app.onebook.autoledger.reports.ReportsLogic
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,6 +31,14 @@ data class HomeFigures(
     val balances: Map<String, Long>,
     val receivableMinor: Long?,
     val payableMinor: Long?,
+    val arOverdueMinor: Long? = null,
+    val apOverdueMinor: Long? = null,
+    val mtdIncomeMinor: Long? = null,
+    val mtdExpenseMinor: Long? = null,
+    val mtdNetMinor: Long? = null,
+    val runwayHeadline: String? = null,
+    val runwayIsPositive: Boolean? = null,
+    val runwayMonths: Double? = null,
 )
 
 data class HomeCache(
@@ -39,6 +47,13 @@ data class HomeCache(
     val balances: Map<String, Long>,
     val receivableMinor: Long,
     val payableMinor: Long,
+    val arOverdueMinor: Long? = null,
+    val apOverdueMinor: Long? = null,
+    val mtdIncomeMinor: Long? = null,
+    val mtdExpenseMinor: Long? = null,
+    val runwayHeadline: String? = null,
+    val runwayIsPositive: Boolean? = null,
+    val runwayMonths: Double? = null,
 )
 
 data class UnansweredSummary(
@@ -103,6 +118,17 @@ data class HomeModel(
     val asOfLabel: String?,
     val couldNotRefresh: Boolean,
     val lastSyncedText: String,
+    val liquidCashMinor: Long? = null,
+    val cards: List<HomeBankAccount> = emptyList(),
+    val arOverdueMinor: Long? = null,
+    val apOverdueMinor: Long? = null,
+    val mtdIncomeMinor: Long? = null,
+    val mtdExpenseMinor: Long? = null,
+    val mtdNetMinor: Long? = null,
+    val mtdMarginPct: Int? = null,
+    val runwayHeadline: String? = null,
+    val runwayIsPositive: Boolean? = null,
+    val runwayMonths: Double? = null,
 )
 
 data class AuthProblem(
@@ -189,6 +215,20 @@ object HomeLogic {
                 text = inrText(minor),
             )
         }
+        val cards = i.mappings.filter { it.kind == AccountType.CARD }.map { m ->
+            val minor = i.figures?.balances?.get(m.glAccount)
+            HomeBankAccount(
+                name = bankDisplayName(m.bankAccount),
+                glAccount = m.glAccount,
+                minor = minor,
+                text = inrText(minor),
+            )
+        }
+        val liquidCashMinor = if (accounts.isNotEmpty() && accounts.all { it.minor != null }) {
+            accounts.sumOf { it.minor!! }
+        } else {
+            null
+        }
         val totalMinor = if (accounts.size > 1 && accounts.all { it.minor != null }) {
             accounts.sumOf { it.minor!! }
         } else {
@@ -261,6 +301,14 @@ object HomeLogic {
             "Last bank message shows ${Formatters.formatInr(pair.second)}"
         }
 
+        val mtdIncome = i.figures?.mtdIncomeMinor
+        val mtdExpense = i.figures?.mtdExpenseMinor
+        val mtdMarginPct = if (mtdIncome != null && mtdExpense != null) {
+            ReportsLogic.marginPct(mtdIncome, mtdExpense)
+        } else {
+            null
+        }
+
         return HomeModel(
             hasFigures = i.figures != null,
             bank = HomeBankSummary(accounts = accounts, total = total),
@@ -283,19 +331,37 @@ object HomeLogic {
             asOfLabel = if (i.figuresStale && i.figuresAt != null) "as of ${relativeTime(i.now, i.figuresAt)}" else null,
             couldNotRefresh = i.figuresStale,
             lastSyncedText = if (i.lastSyncedAt == null) "Not synced yet" else "Last synced ${relativeTime(i.now, i.lastSyncedAt)}",
+            liquidCashMinor = liquidCashMinor,
+            cards = cards,
+            arOverdueMinor = i.figures?.arOverdueMinor,
+            apOverdueMinor = i.figures?.apOverdueMinor,
+            mtdIncomeMinor = mtdIncome,
+            mtdExpenseMinor = mtdExpense,
+            mtdNetMinor = i.figures?.mtdNetMinor,
+            mtdMarginPct = mtdMarginPct,
+            runwayHeadline = i.figures?.runwayHeadline,
+            runwayIsPositive = i.figures?.runwayIsPositive,
+            runwayMonths = i.figures?.runwayMonths,
         )
     }
 
     fun serializeHomeCache(c: HomeCache): String {
         val balObj = JSONObject()
         for ((k, v) in c.balances) balObj.put(k, v)
-        return JSONObject()
+        val o = JSONObject()
             .put("at", c.at)
             .put("site", c.site)
             .put("balances", balObj)
             .put("receivableMinor", c.receivableMinor)
             .put("payableMinor", c.payableMinor)
-            .toString()
+        if (c.arOverdueMinor != null) o.put("arOverdueMinor", c.arOverdueMinor)
+        if (c.apOverdueMinor != null) o.put("apOverdueMinor", c.apOverdueMinor)
+        if (c.mtdIncomeMinor != null) o.put("mtdIncomeMinor", c.mtdIncomeMinor)
+        if (c.mtdExpenseMinor != null) o.put("mtdExpenseMinor", c.mtdExpenseMinor)
+        if (c.runwayHeadline != null) o.put("runwayHeadline", c.runwayHeadline)
+        if (c.runwayIsPositive != null) o.put("runwayIsPositive", c.runwayIsPositive)
+        if (c.runwayMonths != null) o.put("runwayMonths", c.runwayMonths)
+        return o.toString()
     }
 
     fun parseHomeCache(raw: String?, site: String): HomeCache? {
@@ -322,6 +388,13 @@ object HomeLogic {
                 balances = balances,
                 receivableMinor = receivableMinor,
                 payableMinor = payableMinor,
+                arOverdueMinor = if (o.has("arOverdueMinor")) o.getLong("arOverdueMinor") else null,
+                apOverdueMinor = if (o.has("apOverdueMinor")) o.getLong("apOverdueMinor") else null,
+                mtdIncomeMinor = if (o.has("mtdIncomeMinor")) o.getLong("mtdIncomeMinor") else null,
+                mtdExpenseMinor = if (o.has("mtdExpenseMinor")) o.getLong("mtdExpenseMinor") else null,
+                runwayHeadline = o.optString("runwayHeadline", "").takeIf { it.isNotBlank() },
+                runwayIsPositive = if (o.has("runwayIsPositive")) o.getBoolean("runwayIsPositive") else null,
+                runwayMonths = if (o.has("runwayMonths")) o.getDouble("runwayMonths") else null,
             )
         } catch (_: Throwable) {
             null
@@ -339,16 +412,56 @@ object HomeLogic {
     ): LoadedFigures {
         return try {
             if (client == null) throw IllegalStateException("Not signed in")
-            val banks = mappings.filter { it.kind == AccountType.BANK }
-            val (amounts, rp) = coroutineScope {
-                val bankDeferreds = banks.map { m ->
+            val trackedAccounts = mappings.filter { it.kind == AccountType.BANK || it.kind == AccountType.CARD }
+            val (amounts, arResult, apResult, pnlResult) = coroutineScope {
+                val balDeferreds = trackedAccounts.map { m ->
                     async { ErpReports.getBankBalance(client, m.glAccount, company) }
                 }
-                val rpDeferred = async { ErpReports.getReceivablesPayables(client, company) }
-                bankDeferreds.awaitAll() to rpDeferred.await()
+                val arDeferred = async {
+                    runCatching {
+                        ErpReports.getExposureReport(client, company, app.onebook.autoledger.erp.ExposureKind.AR)
+                    }.also { r -> if (r.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw r.exceptionOrNull()!! }
+                }
+                val apDeferred = async {
+                    runCatching {
+                        ErpReports.getExposureReport(client, company, app.onebook.autoledger.erp.ExposureKind.AP)
+                    }.also { r -> if (r.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw r.exceptionOrNull()!! }
+                }
+                val pnlDeferred = async {
+                    runCatching {
+                        ErpReports.getProfitAndLoss(client, company)
+                    }.also { r -> if (r.exceptionOrNull() is kotlinx.coroutines.CancellationException) throw r.exceptionOrNull()!! }
+                }
+                val bals = balDeferreds.awaitAll()
+                Quad(bals, arDeferred.await(), apDeferred.await(), pnlDeferred.await())
             }
             val balances = LinkedHashMap<String, Long>()
-            banks.forEachIndexed { idx, m -> balances[m.glAccount] = amounts[idx] }
+            trackedAccounts.forEachIndexed { idx, m -> balances[m.glAccount] = amounts[idx] }
+
+            val arReport = arResult.getOrNull()
+            val apReport = apResult.getOrNull()
+            val fallbackRp = if (arReport == null || apReport == null) {
+                ErpReports.getReceivablesPayables(client, company)
+            } else {
+                null
+            }
+            val receivableMinor = arReport?.totalOutstandingMinor ?: fallbackRp!!.receivableMinor
+            val payableMinor = apReport?.totalOutstandingMinor ?: fallbackRp!!.payableMinor
+            val arOverdue = arReport?.buckets?.overdueMinor
+            val apOverdue = apReport?.buckets?.overdueMinor
+
+            val pnl = pnlResult.getOrNull()
+            val liquidCash = trackedAccounts
+                .filter { it.kind == AccountType.BANK }
+                .sumOf { balances[it.glAccount] ?: 0L }
+            val cardBalance = trackedAccounts
+                .filter { it.kind == AccountType.CARD }
+                .sumOf { balances[it.glAccount] ?: 0L }
+            val runway = pnl?.let {
+                ReportsLogic.computeRunway(liquidCash, cardBalance, it.months)
+            }
+            val runwayHeadline = runway?.let { ReportsLogic.formatRunwayHeadline(it) }
+
             val at = now()
             try {
                 saveCache(
@@ -357,8 +470,15 @@ object HomeLogic {
                             at = at,
                             site = siteUrl,
                             balances = balances,
-                            receivableMinor = rp.receivableMinor,
-                            payableMinor = rp.payableMinor,
+                            receivableMinor = receivableMinor,
+                            payableMinor = payableMinor,
+                            arOverdueMinor = arOverdue,
+                            apOverdueMinor = apOverdue,
+                            mtdIncomeMinor = pnl?.mtdIncomeMinor,
+                            mtdExpenseMinor = pnl?.mtdExpenseMinor,
+                            runwayHeadline = runwayHeadline,
+                            runwayIsPositive = runway?.isCashFlowPositive,
+                            runwayMonths = runway?.runwayMonths,
                         )
                     )
                 )
@@ -366,7 +486,19 @@ object HomeLogic {
                 // Best effort
             }
             LoadedFigures(
-                figures = HomeFigures(balances, rp.receivableMinor, rp.payableMinor),
+                figures = HomeFigures(
+                    balances = balances,
+                    receivableMinor = receivableMinor,
+                    payableMinor = payableMinor,
+                    arOverdueMinor = arOverdue,
+                    apOverdueMinor = apOverdue,
+                    mtdIncomeMinor = pnl?.mtdIncomeMinor,
+                    mtdExpenseMinor = pnl?.mtdExpenseMinor,
+                    mtdNetMinor = pnl?.mtdNetMinor,
+                    runwayHeadline = runwayHeadline,
+                    runwayIsPositive = runway?.isCashFlowPositive,
+                    runwayMonths = runway?.runwayMonths,
+                ),
                 at = at,
                 stale = false,
                 auth = null,
@@ -379,14 +511,31 @@ object HomeLogic {
             }
             if (cache == null) throw e
             val auth = if (e is ErpAuthError) AuthProblem(e.status, e.deniedDoctype) else null
+            val mtdNet = if (cache.mtdIncomeMinor != null && cache.mtdExpenseMinor != null) {
+                cache.mtdIncomeMinor - cache.mtdExpenseMinor
+            } else null
             LoadedFigures(
-                figures = HomeFigures(cache.balances, cache.receivableMinor, cache.payableMinor),
+                figures = HomeFigures(
+                    balances = cache.balances,
+                    receivableMinor = cache.receivableMinor,
+                    payableMinor = cache.payableMinor,
+                    arOverdueMinor = cache.arOverdueMinor,
+                    apOverdueMinor = cache.apOverdueMinor,
+                    mtdIncomeMinor = cache.mtdIncomeMinor,
+                    mtdExpenseMinor = cache.mtdExpenseMinor,
+                    mtdNetMinor = mtdNet,
+                    runwayHeadline = cache.runwayHeadline,
+                    runwayIsPositive = cache.runwayIsPositive,
+                    runwayMonths = cache.runwayMonths,
+                ),
                 at = cache.at,
                 stale = true,
                 auth = auth,
             )
         }
     }
+
+    private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
     suspend fun loadHomeSnapshot(
         repo: Repo,
