@@ -1,0 +1,5 @@
+{
+  "name": "AutoLedger",
+  "description": "Native Android app that reads bank SMS alerts and prepares draft ERPNext accounting entries.",
+  "requestFramePermissions": []
+}

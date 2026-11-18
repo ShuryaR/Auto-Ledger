@@ -1,0 +1,31 @@
+# Gradle / Android
+.gradle/
+.kotlin/
+.build-outputs/
+build/
+app/build/
+app/schemas/
+local.properties
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Environment & Keys
+.env
+.env.local
+.env.*.local
+!.env.example
+*.jks
+*.keystore
+debug.keystore.base64
+
+# OS / Misc
+.DS_Store
+*.log

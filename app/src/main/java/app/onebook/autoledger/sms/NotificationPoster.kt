@@ -1,0 +1,52 @@
+package app.onebook.autoledger.sms
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.core.app.NotificationCompat
+
+internal object NotificationPoster {
+    const val CHANNEL = "transactions"
+    const val DEEP_LINK = "autoledger://inbox"
+
+    fun post(ctx: Context, item: QueuedSms, parse: NativeParse) {
+        if (!Perms.notificationsAllowed(ctx)) return
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL, "Transactions", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        val id = NotificationText.notificationId(item.seq)
+        val open = Intent(Intent.ACTION_VIEW, Uri.parse(DEEP_LINK))
+            .setPackage(ctx.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val pi = PendingIntent.getActivity(
+            ctx,
+            id,
+            open,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val icon = android.R.drawable.ic_dialog_info
+        val public = NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(icon)
+            .setContentTitle(NotificationText.PUBLIC_TITLE)
+            .setContentText(NotificationText.PUBLIC_TEXT)
+            .build()
+        val n = NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(icon)
+            .setContentTitle(NotificationText.title(parse))
+            .setContentText(NotificationText.PRIVATE_TEXT)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(public)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+        try {
+            nm.notify(id, n)
+        } catch (_: SecurityException) {
+            // Permission revoked between check and post; queue still retains the item.
+        }
+    }
+}
