@@ -1,6 +1,7 @@
 package app.onebook.autoledger.ui.navigation
 
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,8 +10,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import app.onebook.autoledger.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -128,11 +136,41 @@ fun AutoLedgerApp(
     val bootState by container.state.collectAsState()
 
     if (!bootState.bootReady) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(c.paper),
-            contentAlignment = Alignment.Center,
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(c.heroBg)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            CircularProgressIndicator(color = c.accent)
+            Image(
+                painter = painterResource(id = R.drawable.img_autoledger_icon),
+                contentDescription = "AutoLedger logo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(92.dp)
+                    .clip(RoundedCornerShape(24.dp)),
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = "AutoLedger",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = c.heroInk,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Automated ERPNext Ledger",
+                style = MaterialTheme.typography.bodyMedium,
+                color = c.heroMuted,
+            )
+            Spacer(Modifier.height(24.dp))
+            CircularProgressIndicator(
+                color = c.heroAccent,
+                strokeWidth = 2.5.dp,
+                modifier = Modifier.size(28.dp),
+            )
         }
         return
     }

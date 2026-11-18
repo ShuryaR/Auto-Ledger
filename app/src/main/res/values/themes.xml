@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AutoLedger" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="splash_bg">#152340</color>
+    <style name="Theme.AutoLedger" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/splash_bg</item>
+    </style>
 </resources>
